@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="fil">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Folk Song Adventure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top"><h1>Folk Song Adventure</h1><div id="who"></div></header>
+<main id="app"></main>
+<script type="module">
+import { auth, db, toEmail, validUser, msg } from "./firebase.js";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { SONGS } from "./songs.js";
+
+const $ = s => document.querySelector(s), app = $("#app");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let me = null, rec = null, isAdmin = false, regBusy = false;
+
+function topbar() {
+  $("#who").innerHTML = me ? `<span>${esc(rec?.username || "")}</span> ${isAdmin ? '<a class="link" href="admin.html">Admin</a>' : ""} <button class="link" id="lo">Log out</button>` : "";
+  if (me) $("#lo").onclick = () => signOut(auth);
+}
+
+function authView(reg = false) {
+  app.innerHTML = `<section class="card auth"><h2>${reg ? "Create your account" : "Log in"}</h2>
+  <form id="f">${reg ? `<label>Full name<input name="name" required maxlength="60"></label><label>Section<input name="section" required maxlength="30"></label>` : ""}
+  <label>Username<input name="u" required maxlength="20" autocomplete="username" placeholder="letters, numbers, _"></label>
+  <label>Password<input name="p" type="password" required minlength="6" autocomplete="${reg ? "new" : "current"}-password"></label>
+  <p class="err" id="err" role="alert"></p><button class="btn">${reg ? "Create account" : "Log in"}</button></form>
+  <button class="link" id="sw">${reg ? "I already have an account" : "Create an account"}</button></section>`;
+  $("#sw").onclick = () => authView(!reg);
+  $("#f").onsubmit = async e => {
+    e.preventDefault();
+    const d = new FormData(e.target), u = d.get("u"), p = d.get("p"), err = $("#err");
+    err.textContent = "";
+    if (!validUser(u)) { err.textContent = "Username: 3 to 20 letters, numbers or _ only."; return; }
+    try {
+      if (reg) {
+        regBusy = true;
+        const c = await createUserWithEmailAndPassword(auth, toEmail(u), p);
+        await setDoc(doc(db, "scores", c.user.uid), { username: u.trim().toLowerCase(), name: d.get("name").trim(), section: d.get("section").trim().toUpperCase(), songs: {}, total: 0, createdAt: serverTimestamp() });
+        regBusy = false;
+        enter(c.user);
+      } else await signInWithEmailAndPassword(auth, toEmail(u), p);
+    } catch (x) { regBusy = false; err.textContent = msg(x); }
+  };
+}
+
+async function enter(u) {
+  me = u;
+  const s = await getDoc(doc(db, "scores", u.uid));
+  rec = s.exists() ? s.data() : { username: u.email.split("@")[0], songs: {}, total: 0 };
+  try { isAdmin = (await getDoc(doc(db, "admins", u.uid))).exists(); } catch { isAdmin = false; }
+  topbar();
+  home();
+}
+
+function home() {
+  const best = id => rec.songs?.[id]?.best;
+  app.innerHTML = `<h2>Kumusta, ${esc(rec.name || rec.username)}!</h2><p class="total">${rec.total || 0} of ${SONGS.length * 3} points</p>
+  <div class="grid">${SONGS.map((s, i) => `<button class="song" data-i="${i}"><b>${esc(s.title)}</b><span>${best(s.id) == null ? "Not played yet" : `Best score: ${best(s.id)} of 3`}</span></button>`).join("")}</div>`;
+  app.querySelectorAll(".song").forEach(b => b.onclick = () => watch(+b.dataset.i));
+}
+
+function watch(i) {
+  const s = SONGS[i];
+  app.innerHTML = `<button class="link" id="bk">Back to songs</button><section class="card"><h2>${esc(s.title)}</h2>
+  <p>Watch the video, sing along and remember the lyrics. Then answer 3 questions.</p>
+  <div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${s.yt}?rel=0" title="${esc(s.title)}" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
+  <p class="small">Video not showing? <a href="https://www.youtube.com/watch?v=${s.yt}" target="_blank" rel="noopener">Open it on YouTube</a>.</p>
+  <button class="btn" id="go">I’m ready for the questions</button></section>`;
+  $("#bk").onclick = home;
+  $("#go").onclick = () => quiz(i, 0, 0);
+}
+
+const scramble = w => { let r; do { r = [...w].sort(() => Math.random() - .5); } while (r.join("") === w && w.length > 1); return r; };
+
+function quiz(i, n, score) {
+  const s = SONGS[i], q = s.q[n], last = n + 1 >= s.q.length;
+  app.innerHTML = `<div class="bar"><span>${esc(s.title)}</span><span>Question ${n + 1} of ${s.q.length}</span></div>
+  <section class="card"><p class="qt">${esc(q.t)}</p><div id="ans"></div><p id="fb" class="fb" role="status"></p>
+  <button class="btn" id="nx" hidden>${last ? "See my score" : "Next question"}</button></section>`;
+  let sc = score;
+  const done = (ok, right) => {
+    if (ok) sc++;
+    $("#fb").textContent = ok ? "Correct! Tama!" : `Not quite. The answer is: ${right}`;
+    $("#fb").style.color = ok ? "var(--ok)" : "var(--bad)";
+    $("#nx").hidden = false; $("#nx").focus();
+    $("#nx").onclick = () => last ? finish(i, sc) : quiz(i, n + 1, sc);
+  };
+  if (q.o) {
+    $("#ans").innerHTML = q.o.map((o, k) => `<button class="opt" data-k="${k}"><i>${"ABCDEFGHI"[k]}</i>${esc(o)}</button>`).join("");
+    const btns = [...app.querySelectorAll(".opt")];
+    btns.forEach(b => b.onclick = () => {
+      const k = +b.dataset.k;
+      btns.forEach(x => { x.disabled = true; });
+      btns[q.a].classList.add("ok");
+      if (k !== q.a) b.classList.add("bad");
+      done(k === q.a, q.o[q.a]);
+    });
+  } else {
+    $("#ans").innerHTML = `<div class="tiles" aria-label="Jumbled letters">${scramble(q.j).map(c => `<span>${esc(c)}</span>`).join("")}</div>
+    <form id="jf"><input id="ji" autocomplete="off" autocapitalize="off" aria-label="Type the word"><button class="btn">Check</button></form>`;
+    $("#ji").focus();
+    $("#jf").onsubmit = e => {
+      e.preventDefault();
+      const v = $("#ji").value.trim().toLowerCase();
+      if (!v) return;
+      $("#ji").disabled = true; $("#jf button").disabled = true;
+      done(v === q.j, q.j);
+    };
+  }
+}
+
+async function save(i) {
+  const s = SONGS[i], st = $("#sv");
+  st.textContent = "Saving your score...";
+  try {
+    await setDoc(doc(db, "scores", me.uid), { songs: { [s.id]: rec.songs[s.id] }, total: rec.total, updatedAt: serverTimestamp() }, { merge: true });
+    st.textContent = "Score saved.";
+  } catch { st.innerHTML = `Could not save. <button class="link" id="rt">Try again</button>`; $("#rt").onclick = () => save(i); }
+}
+
+function finish(i, sc) {
+  const s = SONGS[i], prev = rec.songs?.[s.id] || {};
+  rec.songs = { ...rec.songs, [s.id]: { best: Math.max(prev.best || 0, sc), last: sc, attempts: (prev.attempts || 0) + 1, at: Date.now() } };
+  rec.total = Object.values(rec.songs).reduce((a, x) => a + x.best, 0);
+  app.innerHTML = `<section class="card"><h2>${esc(s.title)}</h2><p class="qt">You got ${sc} of ${s.q.length}. ${sc === 3 ? "Perfect! Ang galing!" : sc === 2 ? "Great job!" : "Keep singing and try again!"}</p>
+  <p id="sv" class="small" role="status"></p><button class="btn" id="again">Play this song again</button> <button class="link" id="bk">Back to songs</button></section>`;
+  $("#again").onclick = () => watch(i);
+  $("#bk").onclick = home;
+  save(i);
+}
+
+onAuthStateChanged(auth, u => {
+  if (regBusy) return;
+  if (u) enter(u); else { me = null; rec = null; isAdmin = false; topbar(); authView(); }
+});
+</script>
+</body>
+</html>
