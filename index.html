@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0E3B43">
 <title>Folk Song Adventure</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -10,6 +11,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="notes" id="notes" aria-hidden="true"></div>
 <header class="top"><h1>Folk Song Adventure</h1><div id="who"></div></header>
 <main id="app"></main>
 <script type="module">
@@ -21,6 +23,29 @@ import { SONGS } from "./songs.js";
 const $ = s => document.querySelector(s), app = $("#app");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 let me = null, rec = null, isAdmin = false, regBusy = false;
+const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// floating music notes in the background
+if (!calm) {
+  $("#notes").innerHTML = Array.from({ length: 8 }, (_, k) =>
+    `<span style="--l:${6 + k * 12}%;--s:${22 + (k % 3) * 10}px;--t:${14 + (k % 4) * 4}s;--d:${-k * 2.5}s">${"♪♫♬♩"[k % 4]}</span>`).join("");
+}
+
+// small confetti burst for a perfect score
+function burst() {
+  if (calm) return;
+  for (let k = 0; k < 22; k++) {
+    const e = document.createElement("span");
+    e.className = "conf";
+    e.textContent = "♪♫♬★"[k % 4];
+    e.style.cssText = `--x:${Math.random() * 100 - 50}vw;--r:${Math.random() * 720 - 360}deg;--c:${["#F5B91E", "#E4572E", "#fff", "#6FD3B5"][k % 4]};animation-delay:${Math.random() * .3}s`;
+    document.body.appendChild(e);
+    setTimeout(() => e.remove(), 2300);
+  }
+}
+
+const level = p => p >= 1 ? "Kundiman Master" : p >= .75 ? "Bayan Star" : p >= .5 ? "Folk Singer" : p >= .25 ? "Rising Voice" : "New Singer";
+const stars = n => [0, 1, 2].map(k => `<span class="${k < n ? "on" : ""}">★</span>`).join("");
 
 function topbar() {
   $("#who").innerHTML = me ? `<span>${esc(rec?.username || "")}</span> ${isAdmin ? '<a class="link" href="admin.html">Admin</a>' : ""} <button class="link" id="lo">Log out</button>` : "";
@@ -28,9 +53,10 @@ function topbar() {
 }
 
 function authView(reg = false) {
-  app.innerHTML = `<section class="card auth"><h2>${reg ? "Create your account" : "Log in"}</h2>
+  app.innerHTML = `<section class="card auth"><div class="bigdisc" aria-hidden="true"></div><h2>${reg ? "Create your account" : "Log in"}</h2>
+  <p class="small">Sing along, answer the quiz and collect stars!</p>
   <form id="f">${reg ? `<label>Full name<input name="name" required maxlength="60"></label><label>Section<input name="section" required maxlength="30"></label>` : ""}
-  <label>Username<input name="u" required maxlength="20" autocomplete="username" placeholder="letters, numbers, _"></label>
+  <label>Username<input name="u" required maxlength="20" autocomplete="username" autocapitalize="off" placeholder="letters, numbers, _"></label>
   <label>Password<input name="p" type="password" required minlength="6" autocomplete="${reg ? "new" : "current"}-password"></label>
   <p class="err" id="err" role="alert"></p><button class="btn">${reg ? "Create account" : "Log in"}</button></form>
   <button class="link" id="sw">${reg ? "I already have an account" : "Create an account"}</button></section>`;
@@ -62,21 +88,30 @@ async function enter(u) {
 }
 
 function home() {
-  const best = id => rec.songs?.[id]?.best;
-  app.innerHTML = `<h2>Kumusta, ${esc(rec.name || rec.username)}!</h2><p class="total">${rec.total || 0} of ${SONGS.length * 3} points</p>
-  <div class="grid">${SONGS.map((s, i) => `<button class="song" data-i="${i}"><b>${esc(s.title)}</b><span>${best(s.id) == null ? "Not played yet" : `Best score: ${best(s.id)} of 3`}</span></button>`).join("")}</div>`;
+  const best = id => rec.songs?.[id]?.best, max = SONGS.length * 3, tot = rec.total || 0;
+  const played = SONGS.filter(s => best(s.id) != null).length;
+  app.innerHTML = `<section class="card hero"><div><p class="badge">♫ ${level(tot / max)}</p><h2>Kumusta, ${esc(rec.name || rec.username)}!</h2></div>
+  <div><div class="meter-top"><span>${tot} of ${max} points</span><span>${played} of ${SONGS.length} songs played</span></div>
+  <div class="track" role="progressbar" aria-label="Points" aria-valuemin="0" aria-valuemax="${max}" aria-valuenow="${tot}"><i style="width:${Math.round(tot / max * 100)}%"></i></div></div></section>
+  <h3 class="sec">Pick a song to play</h3>
+  <div class="grid">${SONGS.map((s, i) => {
+    const b = best(s.id);
+    return `<button class="song${b === 3 ? " gold" : ""}" data-i="${i}" style="--d:${i * 40}ms"><span class="disc" aria-hidden="true"><em>${i + 1}</em></span>
+    <span class="meta"><b>${esc(s.title)}</b><span class="stars" role="img" aria-label="Best score ${b || 0} of 3">${stars(b || 0)}</span><small>${b == null ? "Not played yet" : `Best score: ${b} of 3`}</small></span></button>`;
+  }).join("")}</div>`;
   app.querySelectorAll(".song").forEach(b => b.onclick = () => watch(+b.dataset.i));
 }
 
 function watch(i) {
   const s = SONGS[i];
-  app.innerHTML = `<button class="link" id="bk">Back to songs</button><section class="card"><h2>${esc(s.title)}</h2>
+  app.innerHTML = `<button class="link" id="bk">Back to songs</button><section class="card"><p class="badge"><span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Now playing</p><h2>${esc(s.title)}</h2>
   <p>Watch the video, sing along and remember the lyrics. Then answer 3 questions.</p>
   <div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${s.yt}?rel=0" title="${esc(s.title)}" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
   <p class="small">Video not showing? <a href="https://www.youtube.com/watch?v=${s.yt}" target="_blank" rel="noopener">Open it on YouTube</a>.</p>
   <button class="btn" id="go">I’m ready for the questions</button></section>`;
   $("#bk").onclick = home;
   $("#go").onclick = () => quiz(i, 0, 0);
+  scrollTo(0, 0);
 }
 
 const scramble = w => { let r; do { r = [...w].sort(() => Math.random() - .5); } while (r.join("") === w && w.length > 1); return r; };
@@ -84,13 +119,15 @@ const scramble = w => { let r; do { r = [...w].sort(() => Math.random() - .5); }
 function quiz(i, n, score) {
   const s = SONGS[i], q = s.q[n], last = n + 1 >= s.q.length;
   app.innerHTML = `<div class="bar"><span>${esc(s.title)}</span><span>Question ${n + 1} of ${s.q.length}</span></div>
-  <section class="card"><p class="qt">${esc(q.t)}</p><div id="ans"></div><p id="fb" class="fb" role="status"></p>
+  <div class="dots" aria-hidden="true">${s.q.map((_, k) => `<i class="${k < n ? "on" : k === n ? "cur" : ""}"></i>`).join("")}</div>
+  <section class="card" id="qc"><p class="qt">${esc(q.t)}</p><div id="ans"></div><p id="fb" class="fb" role="status"></p>
   <button class="btn" id="nx" hidden>${last ? "See my score" : "Next question"}</button></section>`;
   let sc = score;
   const done = (ok, right) => {
     if (ok) sc++;
-    $("#fb").textContent = ok ? "Correct! Tama!" : `Not quite. The answer is: ${right}`;
-    $("#fb").style.color = ok ? "var(--ok)" : "var(--bad)";
+    $("#fb").textContent = ok ? "Correct! Tama! 🎉" : `Not quite. The answer is: ${right}`;
+    $("#fb").className = "fb " + (ok ? "ok" : "bad");
+    $("#qc").classList.add(ok ? "pop" : "shake");
     $("#nx").hidden = false; $("#nx").focus();
     $("#nx").onclick = () => last ? finish(i, sc) : quiz(i, n + 1, sc);
   };
@@ -105,7 +142,7 @@ function quiz(i, n, score) {
       done(k === q.a, q.o[q.a]);
     });
   } else {
-    $("#ans").innerHTML = `<div class="tiles" aria-label="Jumbled letters">${scramble(q.j).map(c => `<span>${esc(c)}</span>`).join("")}</div>
+    $("#ans").innerHTML = `<div class="tiles" aria-label="Jumbled letters">${scramble(q.j).map((c, k) => `<span style="--i:${k}">${esc(c)}</span>`).join("")}</div>
     <form id="jf"><input id="ji" autocomplete="off" autocapitalize="off" aria-label="Type the word"><button class="btn">Check</button></form>`;
     $("#ji").focus();
     $("#jf").onsubmit = e => {
@@ -131,10 +168,13 @@ function finish(i, sc) {
   const s = SONGS[i], prev = rec.songs?.[s.id] || {};
   rec.songs = { ...rec.songs, [s.id]: { best: Math.max(prev.best || 0, sc), last: sc, attempts: (prev.attempts || 0) + 1, at: Date.now() } };
   rec.total = Object.values(rec.songs).reduce((a, x) => a + x.best, 0);
-  app.innerHTML = `<section class="card"><h2>${esc(s.title)}</h2><p class="qt">You got ${sc} of ${s.q.length}. ${sc === 3 ? "Perfect! Ang galing!" : sc === 2 ? "Great job!" : "Keep singing and try again!"}</p>
+  app.innerHTML = `<section class="card"><h2>${esc(s.title)}</h2>
+  <div class="bigstars" role="img" aria-label="${sc} of ${s.q.length} stars">${[0, 1, 2].map(k => `<span class="${k < sc ? "on" : ""}" style="--i:${k}">★</span>`).join("")}</div>
+  <p class="qt">You got ${sc} of ${s.q.length}. ${sc === 3 ? "Perfect! Ang galing!" : sc === 2 ? "Great job!" : "Keep singing and try again!"}</p>
   <p id="sv" class="small" role="status"></p><button class="btn" id="again">Play this song again</button> <button class="link" id="bk">Back to songs</button></section>`;
   $("#again").onclick = () => watch(i);
   $("#bk").onclick = home;
+  if (sc === 3) burst();
   save(i);
 }
 
