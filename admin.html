@@ -13,7 +13,7 @@
 <header class="top"><h1>Student performance</h1><div id="who"></div></header>
 <main id="app"></main>
 <script type="module">
-import { auth, db, toEmail, validUser, msg } from "./firebase.js";
+import { auth, db, toEmail, msg } from "./firebase.js";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { doc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { SONGS } from "./songs.js";
@@ -23,13 +23,18 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "
 let rows = [];
 
 function login() {
-  app.innerHTML = `<section class="card auth"><h2>Admin log in</h2><form id="f"><label>Username<input name="u" required autocomplete="username"></label>
+  app.innerHTML = `<section class="card auth"><h2>Admin log in</h2><form id="f"><label>Username or Email<input name="u" required autocomplete="username"></label>
   <label>Password<input name="p" type="password" required autocomplete="current-password"></label><p class="err" id="err" role="alert"></p><button class="btn">Log in</button></form></section>`;
   $("#f").onsubmit = async e => {
     e.preventDefault();
     const d = new FormData(e.target);
-    if (!validUser(d.get("u"))) { $("#err").textContent = "Wrong username or password."; return; }
-    try { await signInWithEmailAndPassword(auth, toEmail(d.get("u")), d.get("p")); } catch (x) { $("#err").textContent = msg(x); }
+    const rawUser = String(d.get("u") ?? "").trim();
+    const email = rawUser.includes("@") ? rawUser : toEmail(rawUser);
+    try {
+      await signInWithEmailAndPassword(auth, email, d.get("p"));
+    } catch (x) {
+      $("#err").textContent = msg(x);
+    }
   };
 }
 
