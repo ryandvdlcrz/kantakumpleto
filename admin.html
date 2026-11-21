@@ -15,7 +15,7 @@
 <script type="module">
 import { auth, db, toEmail, msg } from "./firebase.js";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { doc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { doc, getDoc, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { SONGS } from "./songs.js";
 
 const $ = s => document.querySelector(s), app = $("#app"), who = $("#who");
@@ -56,9 +56,20 @@ async function load() {
   app.innerHTML = `<div id="stats" class="total"></div>
   <div class="tools"><input id="q" placeholder="Search name or username" aria-label="Search"><select id="sec" aria-label="Section"><option value="">All sections</option>${secs.map(s => `<option>${esc(s)}</option>`).join("")}</select>
   <button class="btn" id="csv">Export CSV</button> <button class="link" id="rf">Refresh</button></div>
-  <div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Section</th>${SONGS.map((s, i) => `<th title="${esc(s.title)}">S${i + 1}</th>`).join("")}<th>Total</th><th>Songs done</th><th>Last played</th></tr></thead><tbody id="tb"></tbody></table></div>
-  <p class="small">S1 to S${SONGS.length} are the best score (out of 3) per song. Hover a header to see the song title.</p>`;
+  <div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Section</th>${SONGS.map((s, i) => `<th title="${esc(s.title)}">S${i + 1}</th>`).join("")}<th>Total</th><th>Songs done</th><th>Last played</th><th>Action</th></tr></thead><tbody id="tb"></tbody></table></div>
+  <p class="small">S1 to S${SONGS.length} are the best score (out of 3) per song. Hover a header to see the song title.</p>
+  <p class="small">Delete removes the student's scores right away. Their login is removed the next time they try to sign in. To free the username immediately, also delete the user under Authentication in the Firebase console.</p>`;
   $("#q").oninput = draw; $("#sec").onchange = draw; $("#csv").onclick = exportCsv; $("#rf").onclick = load;
+  $("#tb").onclick = async e => {
+    const b = e.target.closest("button[data-id]");
+    if (!b) return;
+    const r = rows.find(x => x.id === b.dataset.id);
+    if (!r) return;
+    if (!confirm(`Delete ${r.name} (${r.username})?\n\nThis removes all their scores and their account. It cannot be undone.`)) return;
+    b.disabled = true;
+    try { await deleteDoc(doc(db, "scores", r.id)); rows = rows.filter(x => x.id !== r.id); draw(); }
+    catch (x) { b.disabled = false; alert("Could not delete: " + (x.code || x.message)); }
+  };
   draw();
 }
 
@@ -71,7 +82,7 @@ function view() {
 function draw() {
   const l = view(), avg = l.length ? (l.reduce((a, r) => a + (r.total || 0), 0) / l.length).toFixed(1) : 0;
   $("#stats").textContent = `${l.length} students, average ${avg} of ${SONGS.length * 3} points`;
-  $("#tb").innerHTML = l.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.username)}</td><td>${esc(r.section)}</td>${SONGS.map(s => `<td>${r.songs?.[s.id]?.best ?? "-"}</td>`).join("")}<td><b>${r.total || 0}</b></td><td>${Object.keys(r.songs || {}).length} of ${SONGS.length}</td><td>${esc(fmt(lastAt(r)))}</td></tr>`).join("");
+  $("#tb").innerHTML = l.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.username)}</td><td>${esc(r.section)}</td>${SONGS.map(s => `<td>${r.songs?.[s.id]?.best ?? "-"}</td>`).join("")}<td><b>${r.total || 0}</b></td><td>${Object.keys(r.songs || {}).length} of ${SONGS.length}</td><td>${esc(fmt(lastAt(r)))}</td><td><button class="link" data-id="${esc(r.id)}">Delete</button></td></tr>`).join("");
 }
 function exportCsv() {
   const head = ["Name", "Username", "Section", ...SONGS.map(s => s.title), "Total", "Last played"];

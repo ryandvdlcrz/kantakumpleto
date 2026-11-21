@@ -13,7 +13,9 @@ service cloud.firestore {
     // One score document per student. Students touch only their own; admin reads all.
     match /scores/{uid} {
       allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
-      allow create, update: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid &&
+        request.resource.data.keys().hasAll(['username', 'name', 'section', 'createdAt']);
+      allow update: if request.auth != null && request.auth.uid == uid;
       allow delete: if isAdmin();
     }
   }
