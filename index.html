@@ -132,7 +132,7 @@ function quiz(i, n, score) {
   let sc = score;
   const done = (ok, right) => {
     if (ok) sc++;
-    $("#fb").textContent = ok ? "Correct! Tama! 🎉" : `Not quite. The answer is: ${right}`;
+    $("#fb").textContent = ok ? "Correct! Tama! 🎉" : right ? `Not quite. The answer is: ${right}` : "Not quite.";
     $("#fb").className = "fb " + (ok ? "ok" : "bad");
     $("#qc").classList.add(ok ? "pop" : "shake");
     $("#nx").hidden = false; $("#nx").focus();
@@ -172,16 +172,36 @@ function quiz(i, n, score) {
       done(k === q.a, q.o[q.a]);
     });
   } else {
-    $("#ans").innerHTML = `<div class="tiles" aria-label="Jumbled letters">${scramble(q.j).map((c, k) => `<span style="--i:${k}">${esc(c)}</span>`).join("")}</div>
-    <form id="jf"><input id="ji" autocomplete="off" autocapitalize="off" aria-label="Type the word"><button class="btn">Check</button></form>`;
-    $("#ji").focus();
-    $("#jf").onsubmit = e => {
-      e.preventDefault();
-      const v = $("#ji").value.trim().toLowerCase();
-      if (!v) return;
-      $("#ji").disabled = true; $("#jf button").disabled = true;
-      done(v === q.j, q.j);
+    $("#ans").insertAdjacentHTML("beforebegin", `<p class="small">Tap the letters in the right order to spell the word.</p>`);
+    $("#ans").innerHTML = `<div class="tiles" id="slots" aria-label="Your answer"></div><div class="tiles" id="pool" aria-label="Jumbled letters"></div>
+    <p><button class="btn" type="button" id="clr">Clear</button> <button class="btn" type="button" id="ck" disabled>Check</button></p>`;
+    const letters = scramble(q.j), picked = [];
+    const act = (el, f) => { el.onclick = f; el.onkeydown = ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); f(); } }; };
+    const pool = letters.map((c, k) => { const el = document.createElement("span"); el.textContent = c; el.setAttribute("role", "button"); el.tabIndex = 0; el.style.cssText = `--i:${k};cursor:pointer`; return el; });
+    const slots = letters.map(() => document.createElement("span"));
+    $("#pool").append(...pool); $("#slots").append(...slots);
+    const refresh = () => {
+      pool.forEach((el, k) => { el.style.visibility = picked.includes(k) ? "hidden" : "visible"; });
+      slots.forEach((el, n) => {
+        const k = picked[n];
+        el.textContent = k == null ? "\u00a0" : letters[k];
+        el.style.cssText = k == null ? "background:transparent;border-style:dashed;opacity:.55" : "cursor:pointer";
+        if (k == null) { el.removeAttribute("role"); el.removeAttribute("tabindex"); } else { el.setAttribute("role", "button"); el.tabIndex = 0; }
+      });
+      $("#ck").disabled = picked.length !== letters.length;
     };
+    pool.forEach((el, k) => act(el, () => { if (!picked.includes(k)) { picked.push(k); refresh(); } }));
+    slots.forEach((el, n) => act(el, () => { if (n < picked.length) { picked.splice(n, 1); refresh(); } }));
+    $("#clr").onclick = () => { picked.length = 0; refresh(); };
+    $("#ck").onclick = () => {
+      if (picked.length !== letters.length) return;
+      const ok = picked.map(k => letters[k]).join("") === q.j;
+      $("#ans").style.pointerEvents = "none";
+      $("#clr").disabled = true; $("#ck").disabled = true;
+      slots.forEach(el => { el.style.background = ok ? "#d9f2e3" : "#fbdcdc"; el.style.opacity = "1"; });
+      done(ok, "");
+    };
+    refresh();
   }
 }
 
