@@ -139,9 +139,32 @@ function quiz(i, n, score) {
     $("#nx").onclick = () => last ? finish(i, sc) : quiz(i, n + 1, sc);
   };
   if (q.o) {
-    $("#ans").innerHTML = q.o.map((o, k) => `<button class="opt" data-k="${k}"><i>${"ABCDEFGHI"[k]}</i>${esc(o)}</button>`).join("");
+    $("#ans").innerHTML = q.o.map((o, k) => `<button class="opt" data-k="${k}"><i>${"ABCDEFGHIJ"[k]}</i>${esc(o)}</button>`).join("");
     const btns = [...app.querySelectorAll(".opt")];
-    btns.forEach(b => b.onclick = () => {
+    if (Array.isArray(q.a)) {
+      // several correct answers: the student ticks all of them, then presses Check
+      const pick = new Set();
+      $("#ans").insertAdjacentHTML("beforebegin", `<p class="small">Choose all the correct answers, then press Check.</p>`);
+      $("#ans").insertAdjacentHTML("afterend", `<button class="btn" id="ck">Check</button>`);
+      btns.forEach(b => {
+        b.setAttribute("aria-pressed", "false");
+        b.onclick = () => {
+          const k = +b.dataset.k, on = !pick.has(k);
+          on ? pick.add(k) : pick.delete(k);
+          b.setAttribute("aria-pressed", String(on));
+          b.style.background = on ? "#FFF1C2" : "";
+          b.style.outline = on ? "3px solid #F5B91E" : "";
+        };
+      });
+      $("#ck").onclick = () => {
+        if (!pick.size) return;
+        btns.forEach(x => { x.disabled = true; x.style.background = ""; x.style.outline = ""; });
+        $("#ck").hidden = true;
+        q.a.forEach(k => btns[k].classList.add("ok"));
+        pick.forEach(k => { if (!q.a.includes(k)) btns[k].classList.add("bad"); });
+        done(pick.size === q.a.length && q.a.every(k => pick.has(k)), q.a.map(k => q.o[k]).join(", "));
+      };
+    } else btns.forEach(b => b.onclick = () => {
       const k = +b.dataset.k;
       btns.forEach(x => { x.disabled = true; });
       btns[q.a].classList.add("ok");

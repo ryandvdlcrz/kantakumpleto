@@ -1,9 +1,9 @@
-// q: {t: question, o: [choices], a: index of correct choice}  or  {t, j: "word"} for type-from-jumbled-letters
+// q: {t: question, o: [choices], a: index of correct choice, or an array of indexes when several answers are correct (multi-select)}  or  {t, j: "word"} for type-from-jumbled-letters
 export const SONGS = [
   { id: "s1", title: "Bahay Kubo", yt: "er3EID03smc", q: [
     { t: "Singkamas at talong, ________ at ________", o: ["sigarilyas at manok", "sigarilyas at mani"], a: 1 },
     { t: "At saka mayron pang ________, ________", o: ["labanos, atchara", "labanos, mustasa", "labanos, kutsara"], a: 1 },
-    { t: "Alin sa sumusunod na gulay ang hindi kabilang sa awiting Bahay Kubo?", o: ["Singkamas", "Kamatis", "Sili", "Patatas", "Bawang", "Luya", "Talong", "Sigarilyas", "Linga"], a: 3 } ] },
+    { t: "Alin sa sumusunod na gulay ang hindi kabilang sa awiting Bahay Kubo?", o: ["Singkamas", "Kamatis", "Sili", "Patatas", "Bawang", "Luya", "Talong", "Sigarilyas", "Linga", "Okra"], a: [2, 3, 9] } ] },
   { id: "s2", title: "Leron Leron Sinta", yt: "T56VYfIdxkI", q: [
     { t: "Dala-dala’y ________, sisidlan ng bunga", j: "buslo" },
     { t: "Sino ang ginigising sa awitin upang manampalok?", o: ["Neneng", "Nena", "Nene"], a: 0 },
