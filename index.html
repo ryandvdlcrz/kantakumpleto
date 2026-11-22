@@ -9,6 +9,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<style>
+  /* locked songs on the home screen */
+  .song.locked{background:#dce8e3;border-style:dashed;box-shadow:none;cursor:not-allowed;opacity:.8}
+  .song.locked:hover{transform:none}
+  .song.locked .disc::before{filter:grayscale(1);opacity:.55;animation:none!important}
+  .song.locked .disc em{background:#c4d6cf}
+</style>
 </head>
 <body>
 <div class="notes" id="notes" aria-hidden="true"></div>
@@ -47,6 +54,11 @@ function burst() {
 const level = p => p >= 1 ? "Kundiman Master" : p >= .75 ? "Bayan Star" : p >= .5 ? "Folk Singer" : p >= .25 ? "Rising Voice" : "New Singer";
 const stars = n => [0, 1, 2].map(k => `<span class="${k < n ? "on" : ""}">★</span>`).join("");
 
+// A song is perfect when its best score equals its number of questions.
+const isPerfect = k => (rec?.songs?.[SONGS[k].id]?.best || 0) >= SONGS[k].q.length;
+// The first song is always open. Every other song opens only after the one before it is perfect.
+const isOpen = i => i === 0 || isPerfect(i - 1);
+
 function topbar() {
   $("#who").innerHTML = me ? `<span>${esc(rec?.username || "")}</span> ${isAdmin ? '<a class="link" href="admin.html">Admin</a>' : ""} <button class="link" id="lo">Log out</button>` : "";
   if (me) $("#lo").onclick = () => signOut(auth);
@@ -66,11 +78,20 @@ function authView(reg = false) {
     const d = new FormData(e.target), u = d.get("u"), p = d.get("p"), err = $("#err");
     err.textContent = ""; notice = "";
     if (!validUser(u)) { err.textContent = "Username: 3 to 20 letters, numbers or _ only."; return; }
+    const name = reg ? String(d.get("name") || "").trim() : "";
+    const section = reg ? String(d.get("section") || "").trim() : "";
+    if (reg && (!name || !section)) { err.textContent = "Please fill in your full name and section."; return; }
     try {
       if (reg) {
         regBusy = true;
         const c = await createUserWithEmailAndPassword(auth, toEmail(u), p);
-        await setDoc(doc(db, "scores", c.user.uid), { username: u.trim().toLowerCase(), name: d.get("name").trim(), section: d.get("section").trim().toUpperCase(), songs: {}, total: 0, createdAt: serverTimestamp() });
+        try {
+          await setDoc(doc(db, "scores", c.user.uid), { username: u.trim().toLowerCase(), name, section: section.toUpperCase(), songs: {}, total: 0, createdAt: serverTimestamp() });
+        } catch (e2) {
+          // Do not leave a login without a score record, or the username stays taken.
+          await deleteUser(c.user).catch(() => signOut(auth));
+          throw e2;
+        }
         regBusy = false;
         enter(c.user);
       } else await signInWithEmailAndPassword(auth, toEmail(u), p);
@@ -80,7 +101,15 @@ function authView(reg = false) {
 
 async function enter(u) {
   me = u;
-  const s = await getDoc(doc(db, "scores", u.uid));
+  let s;
+  try { s = await getDoc(doc(db, "scores", u.uid)); }
+  catch {
+    app.innerHTML = `<section class="card auth"><h2>Could not load your account</h2><p class="small">Check your internet connection and try again.</p>
+    <button class="btn" id="rt">Try again</button> <button class="link" id="lo2">Log out</button></section>`;
+    $("#rt").onclick = () => enter(u);
+    $("#lo2").onclick = () => signOut(auth);
+    return;
+  }
   let adminKnown = false;
   try { isAdmin = (await getDoc(doc(db, "admins", u.uid))).exists(); adminKnown = true; } catch { isAdmin = false; }
   if (!s.exists() && adminKnown && !isAdmin) {
@@ -103,16 +132,21 @@ function home() {
   <h3 class="sec">Pick a song to play</h3>
   <div class="grid">${SONGS.map((s, i) => {
     const b = best(s.id);
-    return `<button class="song${b === 3 ? " gold" : ""}" data-i="${i}" style="--d:${i * 40}ms"><span class="disc" aria-hidden="true"><em>${i + 1}</em></span>
+    if (!isOpen(i)) {
+      return `<button class="song locked" disabled style="--d:${i * 40}ms"><span class="disc" aria-hidden="true"><em>🔒</em></span>
+      <span class="meta"><b>${esc(s.title)}</b><small>Locked. Get a perfect score on “${esc(SONGS[i - 1].title)}” to unlock.</small></span></button>`;
+    }
+    return `<button class="song${b >= s.q.length ? " gold" : ""}" data-i="${i}" style="--d:${i * 40}ms"><span class="disc" aria-hidden="true"><em>${i + 1}</em></span>
     <span class="meta"><b>${esc(s.title)}</b><span class="stars" role="img" aria-label="Best score ${b || 0} of 3">${stars(b || 0)}</span><small>${b == null ? "Not played yet" : `Best score: ${b} of 3`}</small></span></button>`;
   }).join("")}</div>`;
-  app.querySelectorAll(".song").forEach(b => b.onclick = () => watch(+b.dataset.i));
+  app.querySelectorAll(".song[data-i]").forEach(b => b.onclick = () => watch(+b.dataset.i));
 }
 
 function watch(i) {
+  if (!isOpen(i)) { home(); return; }
   const s = SONGS[i];
   app.innerHTML = `<button class="link" id="bk">Back to songs</button><section class="card"><p class="badge"><span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Now playing</p><h2>${esc(s.title)}</h2>
-  <p>Watch the video, sing along and remember the lyrics. Then answer 3 questions.</p>
+  <p>Watch the video, sing along and remember the lyrics. Then answer ${s.q.length} questions. You need a perfect score to unlock the next song.</p>
   <div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${s.yt}?rel=0" title="${esc(s.title)}" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
   <p class="small">Video not showing? <a href="https://www.youtube.com/watch?v=${s.yt}" target="_blank" rel="noopener">Open it on YouTube</a>.</p>
   <button class="btn" id="go">I’m ready for the questions</button></section>`;
@@ -120,6 +154,13 @@ function watch(i) {
   $("#go").onclick = () => quiz(i, 0, 0);
   scrollTo(0, 0);
 }
+
+// Returns the numbers 0 to n-1 in random order (Fisher-Yates), used to shuffle answer choices.
+const shuffled = n => {
+  const a = Array.from({ length: n }, (_, k) => k);
+  for (let k = n - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [a[k], a[j]] = [a[j], a[k]]; }
+  return a;
+};
 
 const scramble = w => { let r; do { r = [...w].sort(() => Math.random() - .5); } while (r.join("") === w && w.length > 1); return r; };
 
@@ -130,17 +171,21 @@ function quiz(i, n, score) {
   <section class="card" id="qc"><p class="qt">${esc(q.t)}</p><div id="ans"></div><p id="fb" class="fb" role="status"></p>
   <button class="btn" id="nx" hidden>${last ? "See my score" : "Next question"}</button></section>`;
   let sc = score;
-  const done = (ok, right) => {
+  // The correct answer is never shown after a wrong try. The student only learns right or wrong.
+  const done = ok => {
     if (ok) sc++;
-    $("#fb").textContent = ok ? "Correct! Tama! 🎉" : right ? `Not quite. The answer is: ${right}` : "Not quite.";
+    $("#fb").textContent = ok ? "Correct! Tama! 🎉" : "Not quite.";
     $("#fb").className = "fb " + (ok ? "ok" : "bad");
     $("#qc").classList.add(ok ? "pop" : "shake");
     $("#nx").hidden = false; $("#nx").focus();
     $("#nx").onclick = () => last ? finish(i, sc) : quiz(i, n + 1, sc);
   };
   if (q.o) {
-    $("#ans").innerHTML = q.o.map((o, k) => `<button class="opt" data-k="${k}"><i>${"ABCDEFGHIJ"[k]}</i>${esc(o)}</button>`).join("");
+    // The choices are shuffled every time the question is shown. data-k keeps the ORIGINAL index,
+    // so q.a still points to the right answer; only the position and the A/B/C letter change.
+    $("#ans").innerHTML = shuffled(q.o.length).map((k, pos) => `<button class="opt" data-k="${k}"><i>${"ABCDEFGHIJ"[pos]}</i>${esc(q.o[k])}</button>`).join("");
     const btns = [...app.querySelectorAll(".opt")];
+    const byK = k => btns.find(x => +x.dataset.k === k);
     if (Array.isArray(q.a)) {
       // several correct answers: the student ticks all of them, then presses Check
       const pick = new Set();
@@ -160,16 +205,15 @@ function quiz(i, n, score) {
         if (!pick.size) return;
         btns.forEach(x => { x.disabled = true; x.style.background = ""; x.style.outline = ""; });
         $("#ck").hidden = true;
-        q.a.forEach(k => btns[k].classList.add("ok"));
-        pick.forEach(k => { if (!q.a.includes(k)) btns[k].classList.add("bad"); });
-        done(pick.size === q.a.length && q.a.every(k => pick.has(k)), q.a.map(k => q.o[k]).join(", "));
+        const ok = pick.size === q.a.length && q.a.every(k => pick.has(k));
+        if (ok) pick.forEach(k => byK(k).classList.add("ok"));
+        done(ok);
       };
     } else btns.forEach(b => b.onclick = () => {
-      const k = +b.dataset.k;
+      const k = +b.dataset.k, ok = k === q.a;
       btns.forEach(x => { x.disabled = true; });
-      btns[q.a].classList.add("ok");
-      if (k !== q.a) b.classList.add("bad");
-      done(k === q.a, q.o[q.a]);
+      b.classList.add(ok ? "ok" : "bad");
+      done(ok);
     });
   } else {
     $("#ans").insertAdjacentHTML("beforebegin", `<p class="small">Tap the letters in the right order to spell the word.</p>`);
@@ -199,7 +243,7 @@ function quiz(i, n, score) {
       $("#ans").style.pointerEvents = "none";
       $("#clr").disabled = true; $("#ck").disabled = true;
       slots.forEach(el => { el.style.background = ok ? "#d9f2e3" : "#fbdcdc"; el.style.opacity = "1"; });
-      done(ok, "");
+      done(ok);
     };
     refresh();
   }
@@ -207,6 +251,7 @@ function quiz(i, n, score) {
 
 async function save(i) {
   const s = SONGS[i], st = $("#sv");
+  if (!st) return;
   st.textContent = "Saving your score...";
   try {
     await setDoc(doc(db, "scores", me.uid), { songs: { [s.id]: rec.songs[s.id] }, total: rec.total, updatedAt: serverTimestamp() }, { merge: true });
@@ -215,16 +260,26 @@ async function save(i) {
 }
 
 function finish(i, sc) {
-  const s = SONGS[i], prev = rec.songs?.[s.id] || {};
+  const s = SONGS[i], total = s.q.length, prev = rec.songs?.[s.id] || {}, perfect = sc === total;
   rec.songs = { ...rec.songs, [s.id]: { best: Math.max(prev.best || 0, sc), last: sc, attempts: (prev.attempts || 0) + 1, at: Date.now() } };
   rec.total = Object.values(rec.songs).reduce((a, x) => a + x.best, 0);
+  const hasNext = i + 1 < SONGS.length;
+  const note = perfect
+    ? (hasNext ? "Perfect! Ang galing! The next song is unlocked." : "Perfect! Ang galing! You finished every song!")
+    : `You got ${sc} of ${total}. You need ${total} of ${total} to unlock the next song. Watch the video again and give it another try!`;
   app.innerHTML = `<section class="card"><h2>${esc(s.title)}</h2>
-  <div class="bigstars" role="img" aria-label="${sc} of ${s.q.length} stars">${[0, 1, 2].map(k => `<span class="${k < sc ? "on" : ""}" style="--i:${k}">★</span>`).join("")}</div>
-  <p class="qt">You got ${sc} of ${s.q.length}. ${sc === 3 ? "Perfect! Ang galing!" : sc === 2 ? "Great job!" : "Keep singing and try again!"}</p>
-  <p id="sv" class="small" role="status"></p><button class="btn" id="again">Play this song again</button> <button class="link" id="bk">Back to songs</button></section>`;
+  <div class="bigstars" role="img" aria-label="${sc} of ${total} stars">${[0, 1, 2].map(k => `<span class="${k < sc ? "on" : ""}" style="--i:${k}">★</span>`).join("")}</div>
+  <p class="qt">${esc(note)}</p>
+  <p id="sv" class="small" role="status"></p>
+  ${perfect
+    ? `${hasNext ? '<button class="btn" id="nextsong">Play the next song</button> ' : ""}<button class="link" id="bk">Back to songs</button> <button class="link" id="again">Watch this song again</button>`
+    : `<button class="btn" id="retry">Try the questions again</button> <button class="link" id="again">Watch the video again</button> <button class="link" id="bk">Back to songs</button>`}
+  </section>`;
+  if ($("#nextsong")) $("#nextsong").onclick = () => watch(i + 1);
+  if ($("#retry")) $("#retry").onclick = () => quiz(i, 0, 0);
   $("#again").onclick = () => watch(i);
   $("#bk").onclick = home;
-  if (sc === 3) burst();
+  if (perfect) burst();
   save(i);
 }
 

@@ -50,8 +50,17 @@ onAuthStateChanged(auth, async u => {
 
 async function load() {
   app.innerHTML = "<p>Loading students...</p>";
-  try { rows = (await getDocs(collection(db, "scores"))).docs.map(d => ({ id: d.id, ...d.data() })); }
-  catch (e) { app.innerHTML = `<p class="err">Could not load scores (${esc(e.code || e.message)}). Check the Firestore rules.</p>`; return; }
+  try {
+    const myId = auth.currentUser?.uid;
+    // The admin's own score document (if any) is left out so it does not count as a student.
+    rows = (await getDocs(collection(db, "scores"))).docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(r => r.id !== myId);
+  } catch (e) {
+    app.innerHTML = `<section class="card"><p class="err">Could not load scores (${esc(e.code || e.message)}). Check your internet connection and the Firestore rules.</p><button class="btn" id="retry">Try again</button></section>`;
+    $("#retry").onclick = load;
+    return;
+  }
   const secs = [...new Set(rows.map(r => r.section).filter(Boolean))].sort();
   app.innerHTML = `<div id="stats" class="total"></div>
   <div class="tools"><input id="q" placeholder="Search name or username" aria-label="Search"><select id="sec" aria-label="Section"><option value="">All sections</option>${secs.map(s => `<option>${esc(s)}</option>`).join("")}</select>
@@ -65,7 +74,7 @@ async function load() {
     if (!b) return;
     const r = rows.find(x => x.id === b.dataset.id);
     if (!r) return;
-    if (!confirm(`Delete ${r.name} (${r.username})?\n\nThis removes all their scores and their account. It cannot be undone.`)) return;
+    if (!confirm(`Delete ${r.name || r.username} (${r.username})?\n\nThis removes all their scores right away. Their login is removed the next time they try to sign in. This cannot be undone.`)) return;
     b.disabled = true;
     try { await deleteDoc(doc(db, "scores", r.id)); rows = rows.filter(x => x.id !== r.id); draw(); }
     catch (x) { b.disabled = false; alert("Could not delete: " + (x.code || x.message)); }
@@ -84,10 +93,16 @@ function draw() {
   $("#stats").textContent = `${l.length} students, average ${avg} of ${SONGS.length * 3} points`;
   $("#tb").innerHTML = l.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.username)}</td><td>${esc(r.section)}</td>${SONGS.map(s => `<td>${r.songs?.[s.id]?.best ?? "-"}</td>`).join("")}<td><b>${r.total || 0}</b></td><td>${Object.keys(r.songs || {}).length} of ${SONGS.length}</td><td>${esc(fmt(lastAt(r)))}</td><td><button class="link" data-id="${esc(r.id)}">Delete</button></td></tr>`).join("");
 }
+
+// Stops spreadsheet apps from running a cell as a formula when it starts with = + - @ or a control character.
+const safe = v => {
+  const s = String(v ?? "");
+  return /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+};
 function exportCsv() {
   const head = ["Name", "Username", "Section", ...SONGS.map(s => s.title), "Total", "Last played"];
   const lines = [head, ...view().map(r => [r.name, r.username, r.section, ...SONGS.map(s => r.songs?.[s.id]?.best ?? ""), r.total || 0, fmt(lastAt(r))])]
-    .map(row => row.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
+    .map(row => row.map(v => `"${safe(v).replace(/"/g, '""')}"`).join(","));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv" }));
   a.download = "folk-song-scores.csv"; a.click();

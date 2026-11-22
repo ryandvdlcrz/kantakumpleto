@@ -1,21 +1,73 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
     function isAdmin() {
-      return request.auth != null &&
+      return signedIn() &&
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
+
+    function best(m, id) {
+      return (id in m) ? m[id].best : 0;
+    }
+    function sumBest(m) {
+      return best(m,'s1') + best(m,'s2') + best(m,'s3') + best(m,'s4') + best(m,'s5')
+           + best(m,'s6') + best(m,'s7') + best(m,'s8') + best(m,'s9') + best(m,'s10');
+    }
+    function validEntry(m, id) {
+      return !(id in m) || (
+        m[id].keys().hasOnly(['best','last','attempts','at']) &&
+        m[id].best is int && m[id].best >= 0 && m[id].best <= 3 &&
+        m[id].last is int && m[id].last >= 0 && m[id].last <= 3 &&
+        m[id].attempts is int && m[id].attempts >= 1 &&
+        m[id].at is number
+      );
+    }
+    function validSongs(m) {
+      return m is map &&
+        m.keys().hasOnly(['s1','s2','s3','s4','s5','s6','s7','s8','s9','s10']) &&
+        validEntry(m,'s1') && validEntry(m,'s2') && validEntry(m,'s3') &&
+        validEntry(m,'s4') && validEntry(m,'s5') && validEntry(m,'s6') &&
+        validEntry(m,'s7') && validEntry(m,'s8') && validEntry(m,'s9') &&
+        validEntry(m,'s10');
+    }
+
     // Admin flag: a document whose ID is the admin's UID. Created by hand in the console only.
     match /admins/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid;
+      allow read: if signedIn() && request.auth.uid == uid;
       allow write: if false;
     }
-    // One score document per student. Students touch only their own; admin reads all.
+
     match /scores/{uid} {
-      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
-      allow create: if request.auth != null && request.auth.uid == uid &&
-        request.resource.data.keys().hasAll(['username', 'name', 'section', 'createdAt']);
-      allow update: if request.auth != null && request.auth.uid == uid;
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['username','name','section','songs','total','createdAt'])
+        && request.resource.data.keys().hasAll(['username','name','section','songs','total','createdAt'])
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[a-z0-9_]{3,20}$')
+        && request.auth.token.email.split('@')[0] == request.resource.data.username
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
+        && request.resource.data.section is string
+        && request.resource.data.section.size() > 0 && request.resource.data.section.size() <= 30
+        && request.resource.data.songs == {}
+        && request.resource.data.total == 0
+        && request.resource.data.createdAt == request.time;
+
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['username','name','section','songs','total','createdAt','updatedAt'])
+        && request.resource.data.username == resource.data.username
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.section == resource.data.section
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validSongs(request.resource.data.songs)
+        && request.resource.data.total is int
+        && request.resource.data.total == sumBest(request.resource.data.songs);
+
       allow delete: if isAdmin();
     }
   }
